@@ -1,4 +1,4 @@
-import { BigNumber, providers, utils } from 'ethers'
+import { BigNumber, providers, utils, Contract, Wallet, Signer } from 'ethers'
 import { addDefaultLocalNetwork } from '@arbitrum/sdk'
 import { NodeInterface__factory } from '@arbitrum/sdk/dist/lib/abi/factories/NodeInterface__factory'
 import { NODE_INTERFACE_ADDRESS } from '@arbitrum/sdk/dist/lib/dataEntities/constants'
@@ -12,17 +12,29 @@ import { Provider } from '@ethersproject/providers'
  * @param arbProvider 
  * @returns 
  */
-const destinationAddress = '0x1234563d5de0d7198451f87bcbf15aefd00d434d'
 export const gasEstimator = async (
-    txData: string,
-    gasLimit: BigNumber,
-    arbProvider: string | Provider
+    entryPoint: string,
+    userOp: any,
+    arbProvider: string | Provider,
+    signer: string
 ) => {
     try{
         addDefaultLocalNetwork()
     }catch{}
-    
     const baseL2Provider = typeof(arbProvider) === 'string'? new providers.StaticJsonRpcProvider(arbProvider): arbProvider
+
+    const handleOpsABI =
+    '[{"inputs":[{"components":[{"internalType":"address","name":"sender","type":"address"},{"internalType":"uint256","name":"nonce","type":"uint256"},{"internalType":"bytes","name":"initCode","type":"bytes"},{"internalType":"bytes","name":"callData","type":"bytes"},{"internalType":"uint256","name":"callGasLimit","type":"uint256"},{"internalType":"uint256","name":"verificationGasLimit","type":"uint256"},{"internalType":"uint256","name":"preVerificationGas","type":"uint256"},{"internalType":"uint256","name":"maxFeePerGas","type":"uint256"},{"internalType":"uint256","name":"maxPriorityFeePerGas","type":"uint256"},{"internalType":"bytes","name":"paymasterAndData","type":"bytes"},{"internalType":"bytes","name":"signature","type":"bytes"}],"internalType":"struct UserOperation[]","name":"ops","type":"tuple[]"},{"internalType":"address payable","name":"beneficiary","type":"address"}],"name":"handleOps","outputs":[],"stateMutability":"nonpayable","type":"function"}]'
+    const handleOpsContract = new Contract(
+        entryPoint,
+        handleOpsABI,
+        baseL2Provider,
+    )
+
+    const handleOpsData = handleOpsContract.interface.encodeFunctionData('handleOps', [
+        [userOp],
+        signer,
+    ])
 
     // Instantiation of the NodeInterface object
     const nodeInterface = NodeInterface__factory.connect(NODE_INTERFACE_ADDRESS, baseL2Provider)
@@ -30,9 +42,9 @@ export const gasEstimator = async (
     // Getting the estimations from NodeInterface.GasEstimateComponents()
     // ------------------------------------------------------------------
     const gasEstimateComponents = await nodeInterface.callStatic.gasEstimateComponents(
-        destinationAddress,
+        entryPoint,
         false,
-        txData,
+        handleOpsData,
         {
             blockTag: 'latest',
         }
@@ -47,10 +59,9 @@ export const gasEstimator = async (
     // Calculating some extra values to be able to apply all variables of the formula
     // -------------------------------------------------------------------------------
     // NOTE: This one might be a bit confusing, but l1GasEstimated (B in the formula) is calculated based on l2 gas fees
-    // del const l1Cost = l1GasEstimated.mul(l2EstimatedPrice)
+    const l1Cost = l1GasEstimated.mul(l2EstimatedPrice)
     // NOTE: This is similar to 140 + utils.hexDataLength(txData);
-    // del const l1Size = l1Cost.div(l1EstimatedPrice)
-    const l1Size = utils.hexDataLength(txData) + 140
+    const l1Size = l1Cost.div(l1EstimatedPrice)
 
     // Getting the result of the formula
     // ---------------------------------
@@ -72,7 +83,9 @@ export const gasEstimator = async (
     // TXFEES (Transaction fees) = P * G
     const TXFEES = P.mul(G)
 
+    // console.log('-------------------', typeof TXFEES, TXFEES)
     console.log(`Transaction estimated fees to pay = ${utils.formatEther(TXFEES)} ETH`)
-    console.log(gasLimit.toNumber())
-    return TXFEES.div(gasLimit)
+
+    console.log("L2G: ", l2GasUsed.toNumber())
+    return TXFEES.div(l2GasUsed.sub(50000))
 }

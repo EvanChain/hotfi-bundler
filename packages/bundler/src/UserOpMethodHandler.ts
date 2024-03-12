@@ -13,6 +13,7 @@ import { getAddr } from './modules/moduleUtils'
 import { UserOperationByHashResponse, UserOperationReceipt } from './RpcTypes'
 import { ExecutionErrors, UserOperation, ValidationErrors } from './modules/Types'
 import { gasEstimator } from './modules/ArbGasProvider'
+import { threadId } from 'worker_threads'
 
 const HEX_REGEX = /^0x[a-fA-F\d]*$/i
 
@@ -160,23 +161,9 @@ export class UserOpMethodHandler {
     await this._validateParameters(userOp1, entryPointInput)
     const userOp = await resolveProperties(userOp1)
 
-    const handleOpsABI =
-      '[{"inputs":[{"components":[{"internalType":"address","name":"sender","type":"address"},{"internalType":"uint256","name":"nonce","type":"uint256"},{"internalType":"bytes","name":"initCode","type":"bytes"},{"internalType":"bytes","name":"callData","type":"bytes"},{"internalType":"uint256","name":"callGasLimit","type":"uint256"},{"internalType":"uint256","name":"verificationGasLimit","type":"uint256"},{"internalType":"uint256","name":"preVerificationGas","type":"uint256"},{"internalType":"uint256","name":"maxFeePerGas","type":"uint256"},{"internalType":"uint256","name":"maxPriorityFeePerGas","type":"uint256"},{"internalType":"bytes","name":"paymasterAndData","type":"bytes"},{"internalType":"bytes","name":"signature","type":"bytes"}],"internalType":"struct UserOperation[]","name":"ops","type":"tuple[]"},{"internalType":"address payable","name":"beneficiary","type":"address"}],"name":"handleOps","outputs":[],"stateMutability":"nonpayable","type":"function"}]'
-    const handleOpsContract = new ethers.Contract(
-      entryPointInput,
-      handleOpsABI,
-      this.provider,
-    )
-
-    const handleOpsData = handleOpsContract.interface.encodeFunctionData('handleOps', [
-      [userOp],
-      entryPointInput,
-    ])
-
-    // const gasLimit = BigNumber.from(userOp1.callGasLimit).add(BigNumber.from(userOp1.verificationGasLimit)).add(BigNumber.from(userOp1.preVerificationGas))
-
     // check gas price
-    const minFee = await gasEstimator(handleOpsData, BigNumber.from(userOp1.callGasLimit), this.provider)
+    // const minFee = await gasEstimator(entryPointInput, userOp, this.provider, await this.signer.getAddress())
+    const minFee = await gasEstimator(entryPointInput, userOp, this.provider, entryPointInput)
 
     requireCond(minFee != null, 'Fail to get gas data', -32602)
 
